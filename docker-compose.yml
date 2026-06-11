@@ -1,0 +1,21 @@
+services:
+  fasthelpdesk:
+    build: .
+    ports:
+      - "5007:5007"
+    environment:
+      FASTHELPDESK_DB: /data/fasthelpdesk.sqlite
+      FASTHELPDESK_PORT: "5007"
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-xai}
+      MODEL_NAME: ${MODEL_NAME:-grok-4-1-fast-reasoning}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      FASTHELPDESK_ADMIN_EMAIL: ${FASTHELPDESK_ADMIN_EMAIL:-admin@fasthelpdesk.example}
+      FASTHELPDESK_ADMIN_PASSWORD: ${FASTHELPDESK_ADMIN_PASSWORD:-FastHelpdesk2026$$}
+      FASTHELPDESK_SECRET: ${FASTHELPDESK_SECRET:-}
+    volumes:
+      - fasthelpdesk-data:/data
+volumes:
+  fasthelpdesk-data:
