@@ -78,7 +78,8 @@ ARTICLES = [
 def build():
     db.init_schema()
     with db.cursor() as conn:
-        for t in ("chat_messages", "ticket_activity", "ticket_messages", "tickets",
+        for t in ("chat_messages", "canned_responses", "escalation_rules",
+                  "ticket_activity", "ticket_messages", "tickets",
                   "articles", "article_categories", "contacts", "customers",
                   "agents", "teams"):
             conn.execute(f"DELETE FROM {t}")
@@ -208,9 +209,36 @@ def build():
         conn.executemany(
             "INSERT INTO ticket_activity(ticket_id,action,actor,created) VALUES (?,?,?,?)", acts)
 
+    # canned responses
+    canned = [
+        ("Acknowledge & investigate",
+         "Hi {{customer}},\n\nThanks for getting in touch about \"{{subject}}\". I'm looking into this "
+         "now and will get back to you shortly with an update.\n\nBest regards,\n{{agent}}"),
+        ("Ask for more details",
+         "Hi {{customer}},\n\nTo help me resolve this quickly, could you share:\n- the steps that led to "
+         "the issue\n- any error messages you saw\n- a screenshot if possible\n\nThanks,\n{{agent}}"),
+        ("Resolved — confirm",
+         "Hi {{customer}},\n\nThis should now be resolved. Could you confirm everything is working on your "
+         "side? I'll close the ticket once you're happy.\n\nThanks,\n{{agent}}"),
+        ("Escalating to specialist",
+         "Hi {{customer}},\n\nI've escalated \"{{subject}}\" to our specialist team so it gets the right "
+         "attention. They'll follow up directly.\n\nBest,\n{{agent}}"),
+    ]
+    with db.cursor() as conn:
+        conn.executemany(
+            "INSERT INTO canned_responses(title,body,created) VALUES (?,?,datetime('now'))", canned)
+        # escalation rules
+        conn.executemany(
+            "INSERT INTO escalation_rules(name,priority_filter,trigger,action,target_team_id,enabled,created) "
+            "VALUES (?,?,?,?,?,?,datetime('now'))",
+            [("Urgent unanswered → raise", "Any", "Response overdue", "Set Urgent", None, 1),
+             ("Unassigned high → bump", "High", "Unassigned", "Raise priority", None, 1),
+             ("Resolution overdue → escalate team", "Any", "Resolution overdue", "Assign to team", team_ids[0], 0)])
+
     print(f"FastHelpdesk seeded → {db.DB_PATH}")
     print(f"  {len(agents)} agents · {len(TEAMS)} teams · {len(customers)} customers · "
           f"{n} tickets · {len(arts)} articles · {len(msgs)} messages")
+    print(f"  {len(canned)} canned replies · 3 escalation rules")
 
 
 if __name__ == "__main__":

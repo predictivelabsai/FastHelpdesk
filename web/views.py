@@ -141,7 +141,20 @@ def ticket_main(tid):
 
     thread = Div(*[Div(Div(f"{m['author']} · {_ago(m['created'])}", cls="who"),
                        Div(NotStr(m["body"])), cls=f"bubble {m['sender']}") for m in msgs], cls="thread")
-    reply = Form(Textarea("", name="body", placeholder="Write a reply to the customer…", required=True),
+
+    # canned-response chips — clicking one fills the reply box (placeholders resolved)
+    canned = db.canned_responses()
+    canned_bar = None
+    if canned:
+        chips = [Button("＋ " + c["title"], type="button", cls="canned-chip",
+                        title=db.render_canned(c["body"], t)[:120],
+                        **{"data-body": db.render_canned(c["body"], t),
+                           "onclick": "insertCanned(this.dataset.body)"}) for c in canned]
+        canned_bar = Div(Span("Canned replies:", cls="canned-label"), *chips,
+                         A("Manage", href="/canned", cls="canned-manage"), cls="canned-bar")
+
+    reply = Form(Textarea("", name="body", id="reply-body",
+                          placeholder="Write a reply to the customer…", required=True),
                  Div(Button("↩ Send reply", cls="btn primary", type="submit", name="sender", value="agent"),
                      Button("🔒 Internal note", cls="btn", type="submit", name="sender", value="note"),
                      style="margin-top:8px;display:flex;gap:8px;"),
@@ -167,7 +180,7 @@ def ticket_main(tid):
     timeline = Ul(*[Li(Div(Strong(NotStr(a["action"])), " ", Span(a["actor"] or "", style="color:var(--text-mute);")),
                        Div(_ago(a["created"]), cls="when")) for a in acts] or [Li("No activity.")], cls="timeline")
 
-    return Div(Div(Div(Div(H3("Conversation"), cls="card-header"), thread, reply, cls="card")),
+    return Div(Div(Div(Div(H3("Conversation"), cls="card-header"), thread, canned_bar, reply, cls="card")),
                Div(info, Div(Div(H3("Activity"), cls="card-header"), timeline, cls="card")),
                cls="detail-grid")
 
@@ -242,3 +255,89 @@ def customers_list():
                 Tbody(*[Tr(Td(Strong(c["name"])), Td(c["domain"] or "—"),
                            Td(str(c["tickets"])), Td(str(c["open_n"] or 0))) for c in custs]), cls="tbl")
     return _title("Customers", f"{len(custs)} accounts"), Div(tbl, cls="card")
+
+
+# ---------- canned responses ------------------------------------------------
+
+def canned_list():
+    cans = db.canned_responses()
+    rows_ = [Tr(Td(Strong(c["title"])),
+                Td(NotStr((c["body"] or "")[:140] + ("…" if len(c["body"]) > 140 else "")),
+                   style="color:var(--text-dim);"),
+                Td(Form(Button("🗑", cls="btn sm danger", type="submit"),
+                        method="post", action=f"/canned/{c['id']}/delete", style="display:inline;")))
+             for c in cans]
+    tbl = Table(Thead(Tr(Th("Title"), Th("Body"), Th(""))),
+                Tbody(*rows_ or [Tr(Td("No canned replies yet.", colspan="3"))]), cls="tbl")
+    add = Form(
+        Input(name="title", placeholder="Title (e.g. Ask for details)", required=True,
+              style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;"),
+        Textarea("", name="body", required=True, rows="4",
+                 placeholder="Hi {{customer}}, thanks for reaching out about {{subject}}…",
+                 style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;font-family:inherit;"),
+        Div(Button("Add canned reply", cls="btn primary", type="submit"), style="margin-top:8px;"),
+        method="post", action="/canned/new")
+    return (_title("Canned Replies", f"{len(cans)} saved templates"),
+            Div(Div(H3("New canned reply"), cls="card-header"),
+                P(NotStr("Placeholders <code>{{customer}}</code>, <code>{{agent}}</code> and "
+                         "<code>{{subject}}</code> are filled in when you insert a reply on a ticket."),
+                  cls="sub", style="margin-bottom:10px;"),
+                add, cls="card"),
+            Div(Div(H3("Saved replies"), cls="card-header"), tbl, cls="card"))
+
+
+# ---------- escalation rules ------------------------------------------------
+
+def escalations_view(result=None):
+    rules = db.escalation_rules()
+    teams = db.rows("SELECT id, name FROM teams ORDER BY name")
+
+    rule_rows = []
+    for r in rules:
+        target = f" → {r['target_team']}" if r["action"] == "Assign to team" and r["target_team"] else ""
+        rule_rows.append(Tr(
+            Td(Strong(r["name"])),
+            Td(r["priority_filter"]),
+            Td(_pill(r["trigger"])),
+            Td(r["action"] + target),
+            Td(_pill("On", "ok2") if r["enabled"] else _pill("Off", "neutral")),
+            Td(Div(
+                Form(Button("Disable" if r["enabled"] else "Enable", cls="btn sm", type="submit"),
+                     method="post", action=f"/escalations/{r['id']}/toggle", style="display:inline;"),
+                Form(Button("🗑", cls="btn sm danger", type="submit"),
+                     method="post", action=f"/escalations/{r['id']}/delete", style="display:inline;"),
+                style="display:flex;gap:6px;"))))
+    rules_tbl = Table(Thead(Tr(Th("Rule"), Th("Priority"), Th("Trigger"), Th("Action"),
+                              Th("Status"), Th(""))),
+                      Tbody(*rule_rows or [Tr(Td("No rules yet — add one below.", colspan="6"))]), cls="tbl")
+
+    add = Form(
+        Div(Input(name="name", placeholder="Rule name", required=True, style="flex:2;"),
+            Select(Option("Any priority", value="Any"),
+                   *[Option(p, value=p) for p in db.PRIORITIES], name="priority_filter", style="flex:1;"),
+            style="display:flex;gap:8px;margin-bottom:8px;"),
+        Div(Select(*[Option(t, value=t) for t in db.ESCALATION_TRIGGERS], name="trigger", style="flex:1;"),
+            Select(*[Option(a, value=a) for a in db.ESCALATION_ACTIONS], name="action", style="flex:1;"),
+            Select(Option("(team, if assigning)", value=""),
+                   *[Option(tm["name"], value=str(tm["id"])) for tm in teams], name="target_team_id", style="flex:1;"),
+            style="display:flex;gap:8px;margin-bottom:10px;"),
+        Button("Add rule", cls="btn primary", type="submit"),
+        method="post", action="/escalations/new")
+
+    blocks = [_title("Escalation Rules",
+                     "Automate SLA enforcement — raise priority or reassign when tickets breach.",
+                     Form(Button("⚡ Run escalations now", cls="btn primary", type="submit"),
+                          method="post", action="/escalations/run", style="display:inline;"))]
+    if result is not None:
+        if result:
+            items = [Li(NotStr(f"#{x['ticket_id']} <strong>{x['subject'][:50]}</strong> — "
+                               f"{x['detail']} <span style='color:var(--text-mute)'>(rule: {x['rule']})</span>"))
+                     for x in result]
+            blocks.append(Div(Div(H3(f"Escalated {len(result)} ticket action(s)"), cls="card-header"),
+                              Ul(*items, cls="timeline"), cls="card"))
+        else:
+            blocks.append(Div(P("No tickets matched any enabled rule — queue is healthy. 🎉"),
+                              cls="card"))
+    blocks.append(Div(Div(H3("Rules"), cls="card-header"), rules_tbl, cls="card"))
+    blocks.append(Div(Div(H3("New rule"), cls="card-header"), add, cls="card"))
+    return tuple(blocks)

@@ -82,6 +82,14 @@ table.tbl tr:last-child td{border-bottom:0;} table.tbl tr:hover td{background:va
 .seg a.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .btn{padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:13px;}
 .btn:hover{background:var(--surface-2);} .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);} .btn.primary:hover{background:var(--accent-hover);}
+.btn.sm{padding:4px 9px;font-size:12px;}
+.btn.danger{border-color:var(--breach,#dc2626);color:var(--breach,#dc2626);} .btn.danger:hover{background:var(--breach,#dc2626);color:#fff;}
+.pill.ok2{background:var(--ok-light);color:#166534;} .pill.neutral{background:#e2e8f0;color:#475569;}
+.canned-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:12px;}
+.canned-label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-mute);font-weight:600;}
+.canned-chip{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--text-dim);}
+.canned-chip:hover{border-color:var(--accent);color:var(--accent-hover);background:var(--accent-light);}
+.canned-manage{font-size:11.5px;color:var(--text-mute);margin-left:4px;}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;}
 .toolbar input[type=search]{padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:240px;}
 .mini-select{padding:3px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);max-width:160px;}
@@ -126,6 +134,8 @@ NAV_ITEMS = [
     ("OVERVIEW", [("dashboard", "Dashboard", "📊", "/"), ("ai", "AI Assistant", "🤖", "/ai")]),
     ("SUPPORT", [("tickets", "Tickets", "🎫", "/tickets"),
                  ("agents", "Agents & Teams", "🧑‍💼", "/agents")]),
+    ("AUTOMATION", [("canned", "Canned Replies", "💬", "/canned"),
+                    ("escalations", "Escalation Rules", "⚡", "/escalations")]),
     ("KNOWLEDGE", [("kb", "Knowledge Base", "📚", "/kb"),
                    ("customers", "Customers", "🏢", "/customers")]),
     ("HELP", [("guide", "User Guide", "📖", "/guide")]),
@@ -199,6 +209,9 @@ def kpi_card(label, value, trend="", tone=""):
 
 
 LAYOUT_JS = """
+function insertCanned(text){var el=document.getElementById('reply-body');if(!el)return;
+  el.value=(el.value&&el.value.trim()?el.value.replace(/\\s*$/,'')+'\\n\\n':'')+text;el.focus();
+  el.scrollTop=el.scrollHeight;}
 function _sync(){var app=document.querySelector('.app');if(!app)return;
   var ex=app.classList.contains('right-expanded'),col=app.classList.contains('right-collapsed');
   var eb=document.getElementById('copilot-exp-btn');if(eb){eb.innerHTML=ex?'\\u00BB':'\\u00AB';}

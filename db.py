@@ -156,6 +156,22 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     content       TEXT NOT NULL,
     created       TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS canned_responses (
+    id            INTEGER PRIMARY KEY,
+    title         TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    created       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS escalation_rules (
+    id              INTEGER PRIMARY KEY,
+    name            TEXT NOT NULL,
+    priority_filter TEXT NOT NULL DEFAULT 'Any',   -- 'Any' | a priority
+    trigger         TEXT NOT NULL,                 -- Response overdue | Resolution overdue | Unassigned
+    action          TEXT NOT NULL,                 -- Raise priority | Set Urgent | Assign to team
+    target_team_id  INTEGER REFERENCES teams(id),
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created         TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_agent  ON tickets(agent_id);
 CREATE INDEX IF NOT EXISTS idx_msg_ticket     ON ticket_messages(ticket_id);
@@ -316,3 +332,139 @@ def assign_agent(tid: int, agent_id):
             conn.execute("UPDATE tickets SET agent_id=NULL WHERE id=?", (tid,))
             msg = "Unassigned"
     _log(tid, msg)
+
+
+# --- canned responses -------------------------------------------------------
+
+def canned_responses():
+    return rows("SELECT * FROM canned_responses ORDER BY title")
+
+
+def create_canned_response(title: str, body: str) -> int | None:
+    title, body = (title or "").strip(), (body or "").strip()
+    if not title or not body:
+        return None
+    with cursor() as conn:
+        conn.execute("INSERT INTO canned_responses(title,body,created) VALUES (?,?,datetime('now'))",
+                     (title, body))
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def delete_canned_response(cid: int):
+    with cursor() as conn:
+        conn.execute("DELETE FROM canned_responses WHERE id=?", (cid,))
+
+
+def render_canned(body: str, ticket: dict) -> str:
+    """Substitute {{customer}}, {{agent}}, {{subject}} placeholders for preview."""
+    return (body
+            .replace("{{customer}}", ticket.get("contact_name") or ticket.get("customer") or "there")
+            .replace("{{agent}}", ticket.get("agent_name") or "the support team")
+            .replace("{{subject}}", ticket.get("subject") or "your request"))
+
+
+# --- escalation rules -------------------------------------------------------
+
+ESCALATION_TRIGGERS = ["Response overdue", "Resolution overdue", "Unassigned"]
+ESCALATION_ACTIONS = ["Raise priority", "Set Urgent", "Assign to team"]
+_PRIORITY_LADDER = ["Low", "Medium", "High", "Urgent"]
+
+
+def _now() -> datetime:
+    return datetime(2026, 6, 11, 12, 0, 0)
+
+
+def escalation_rules():
+    return rows("""SELECT e.*, tm.name target_team FROM escalation_rules e
+                   LEFT JOIN teams tm ON tm.id=e.target_team_id ORDER BY e.id""")
+
+
+def create_escalation_rule(name, priority_filter, trigger, action, target_team_id=None) -> int | None:
+    if trigger not in ESCALATION_TRIGGERS or action not in ESCALATION_ACTIONS:
+        return None
+    pf = priority_filter if priority_filter in PRIORITIES else "Any"
+    tt = int(target_team_id) if (action == "Assign to team" and target_team_id) else None
+    with cursor() as conn:
+        conn.execute("""INSERT INTO escalation_rules(name,priority_filter,trigger,action,target_team_id,enabled,created)
+                        VALUES (?,?,?,?,?,1,datetime('now'))""",
+                     ((name or "Rule").strip(), pf, trigger, action, tt))
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def toggle_escalation_rule(rid: int):
+    with cursor() as conn:
+        conn.execute("UPDATE escalation_rules SET enabled = 1-enabled WHERE id=?", (rid,))
+
+
+def delete_escalation_rule(rid: int):
+    with cursor() as conn:
+        conn.execute("DELETE FROM escalation_rules WHERE id=?", (rid,))
+
+
+def _rule_matches(rule, t, now) -> bool:
+    if t["status"] not in OPEN_STATUSES:
+        return False
+    if rule["priority_filter"] != "Any" and t["priority"] != rule["priority_filter"]:
+        return False
+    trig = rule["trigger"]
+    if trig == "Response overdue":
+        rb = _parse(t.get("response_by"))
+        return (not t.get("first_responded_on")) and bool(rb) and rb < now
+    if trig == "Resolution overdue":
+        rb = _parse(t.get("resolution_by"))
+        return (not t.get("resolved_on")) and bool(rb) and rb < now
+    if trig == "Unassigned":
+        return t.get("agent_id") is None
+    return False
+
+
+def _apply_escalation_action(rule, t):
+    """Apply a rule's action to ticket dict t (mutating it), return a description
+    or None if it was already satisfied (no-op)."""
+    action = rule["action"]
+    if action == "Raise priority":
+        i = _PRIORITY_LADDER.index(t["priority"]) if t["priority"] in _PRIORITY_LADDER else 0
+        if i >= len(_PRIORITY_LADDER) - 1:
+            return None
+        newp = _PRIORITY_LADDER[i + 1]
+        with cursor() as conn:
+            conn.execute("UPDATE tickets SET priority=? WHERE id=?", (newp, t["id"]))
+        t["priority"] = newp
+        desc = f"priority raised to {newp}"
+    elif action == "Set Urgent":
+        if t["priority"] == "Urgent":
+            return None
+        with cursor() as conn:
+            conn.execute("UPDATE tickets SET priority='Urgent' WHERE id=?", (t["id"],))
+        t["priority"] = "Urgent"
+        desc = "priority set to Urgent"
+    elif action == "Assign to team":
+        if not rule["target_team_id"] or t.get("team_id") == rule["target_team_id"]:
+            return None
+        with cursor() as conn:
+            conn.execute("UPDATE tickets SET team_id=? WHERE id=?", (rule["target_team_id"], t["id"]))
+        t["team_id"] = rule["target_team_id"]
+        desc = f"reassigned to team {rule['target_team']}"
+    else:
+        return None
+    _log(t["id"], f"⚡ Escalated by rule <strong>{rule['name']}</strong>: {desc}", actor="Automation")
+    return desc
+
+
+def apply_escalations() -> list[dict]:
+    """Run all enabled rules over open tickets; return what was changed."""
+    now = _now()
+    rules = [r for r in escalation_rules() if r["enabled"]]
+    open_q = ",".join("?" * len(OPEN_STATUSES))
+    tickets = rows(f"SELECT * FROM tickets WHERE status IN ({open_q})", tuple(OPEN_STATUSES))
+    by_id = {t["id"]: t for t in tickets}
+    out = []
+    for rule in rules:
+        for t in by_id.values():
+            if not _rule_matches(rule, t, now):
+                continue
+            desc = _apply_escalation_action(rule, t)
+            if desc:
+                out.append({"ticket_id": t["id"], "subject": t["subject"],
+                            "rule": rule["name"], "detail": desc})
+    return out

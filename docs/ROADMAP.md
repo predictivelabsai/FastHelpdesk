@@ -19,6 +19,8 @@ what's deferred.
 | Customers | `HD Customer` | `customers` |
 | Knowledge base | `HD Article` / `HD Article Category` | `articles` / `article_categories` |
 | CSAT | `HD Ticket Feedback` | `feedback_rating` → CSAT KPI |
+| **Canned responses** | `HD Canned Response` | `canned_responses` + one-click insert with {{placeholders}} |
+| **Escalation rules** | `HD Escalation Rule` | `escalation_rules` + a run engine that raises priority / reassigns |
 | **AI assistant** | *(not upstream)* | grounded multi-provider chat + triage |
 
 ## Near-term roadmap 🔜
@@ -28,8 +30,14 @@ what's deferred.
    agent** with optimistic SLA recompute.
 2. **Ticket templates & types** — `HD Ticket Template`/`…Field` (structured
    intake forms per ticket type).
-3. **Escalation rules** — `HD Escalation Rule` (auto-escalate on SLA breach).
-4. **Canned responses** — `HD Saved Reply`/`…Team` (reusable reply snippets).
+3. ✅ **Escalation rules** (done) — define rules (priority filter + trigger:
+   response/resolution overdue or unassigned → action: raise priority, set
+   urgent, or reassign to a team), enable/disable them, and "Run escalations"
+   applies them across the open queue, logging each change to the ticket
+   timeline as an Automation action. Time-based auto-running still to come.
+4. ✅ **Canned responses** (done) — a managed library of reply templates with
+   `{{customer}}`/`{{agent}}`/`{{subject}}` placeholders; on a ticket they show
+   as chips that insert the (resolved) text into the reply box.
 5. **Article feedback & search** — `HD Article Feedback`, `HD Stopword`/
    `HD Synonym` (helpful/not-helpful + better KB search).
 6. **Customer portal** — upstream has an agent desk *and* a customer portal; add

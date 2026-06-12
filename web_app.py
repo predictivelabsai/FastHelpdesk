@@ -148,6 +148,69 @@ def get(session):
     return _guard(session, "customers", views.customers_list)
 
 
+# --- canned replies ---------------------------------------------------------
+
+@rt("/canned")
+def get(session):
+    return _guard(session, "canned", views.canned_list)
+
+
+@rt("/canned/new")
+def post(session, title: str = "", body: str = ""):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    db.create_canned_response(title, body)
+    return RedirectResponse("/canned", status_code=303)
+
+
+@rt("/canned/{cid}/delete")
+def post(session, cid: int):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    db.delete_canned_response(cid)
+    return RedirectResponse("/canned", status_code=303)
+
+
+# --- escalation rules -------------------------------------------------------
+
+@rt("/escalations")
+def get(session):
+    return _guard(session, "escalations", views.escalations_view)
+
+
+@rt("/escalations/new")
+def post(session, name: str = "", priority_filter: str = "Any", trigger: str = "",
+         action: str = "", target_team_id: str = ""):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    db.create_escalation_rule(name, priority_filter, trigger, action, target_team_id or None)
+    return RedirectResponse("/escalations", status_code=303)
+
+
+@rt("/escalations/{rid}/toggle")
+def post(session, rid: int):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    db.toggle_escalation_rule(rid)
+    return RedirectResponse("/escalations", status_code=303)
+
+
+@rt("/escalations/{rid}/delete")
+def post(session, rid: int):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    db.delete_escalation_rule(rid)
+    return RedirectResponse("/escalations", status_code=303)
+
+
+@rt("/escalations/run")
+def post(session):
+    if not _user(session):
+        return RedirectResponse("/login", status_code=303)
+    result = db.apply_escalations()
+    return _guard(session, "escalations", lambda: views.escalations_view(result))
+
+
 @rt("/ai")
 def get(session):
     body = (views._title("AI Assistant", "Chat lives in the right rail. Ask in plain English or use slash-commands."),
@@ -222,6 +285,8 @@ def _ensure_db():
         logger.info("No database found — seeding synthetic data…")
         import seed
         seed.build()
+    else:
+        db.init_schema()  # idempotent; creates canned_responses / escalation_rules
 
 
 _ensure_db()
