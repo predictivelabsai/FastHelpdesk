@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fasthtml.common import (
     Div, H1, H3, H4, P, Span, A, Table, Thead, Tbody, Tr, Th, Td, Ul, Li,
-    Strong, NotStr, Form, Input,
+    Strong, NotStr, Form, Input, Button, Textarea, Select, Option,
 )
 
 import db
@@ -124,38 +124,60 @@ def tickets_list(status="Open queue", priority="All", q=""):
     return _title("Tickets", f"{len(tickets)} shown"), seg, pri_seg, search, Div(tbl, cls="card")
 
 
+def _select(name, options, current, tid, field):
+    return Select(*[Option(o, value=o, selected=(o == current)) for o in options],
+                  name=name, cls="mini-select",
+                  **{"hx-post": f"/tickets/{tid}/field", "hx-vals": f'{{"field":"{field}"}}',
+                     "hx-target": "#ticket-main", "hx-swap": "innerHTML", "hx-trigger": "change"})
+
+
+def ticket_main(tid):
+    t = db.ticket(tid)
+    if not t:
+        return Div(P("No such ticket."))
+    msgs = db.messages_for(tid)
+    acts = db.activity_for(tid)
+    ags = db.agents()
+
+    thread = Div(*[Div(Div(f"{m['author']} · {_ago(m['created'])}", cls="who"),
+                       Div(NotStr(m["body"])), cls=f"bubble {m['sender']}") for m in msgs], cls="thread")
+    reply = Form(Textarea("", name="body", placeholder="Write a reply to the customer…", required=True),
+                 Div(Button("↩ Send reply", cls="btn primary", type="submit", name="sender", value="agent"),
+                     Button("🔒 Internal note", cls="btn", type="submit", name="sender", value="note"),
+                     style="margin-top:8px;display:flex;gap:8px;"),
+                 **{"hx-post": f"/tickets/{tid}/message", "hx-target": "#ticket-main", "hx-swap": "innerHTML"},
+                 cls="reply-form")
+
+    agent_sel = Select(Option("Unassigned", value="", selected=not t["agent_id"]),
+                       *[Option(a["name"], value=str(a["id"]), selected=(a["id"] == t["agent_id"])) for a in ags],
+                       name="agent_id", cls="mini-select",
+                       **{"hx-post": f"/tickets/{tid}/assign", "hx-target": "#ticket-main",
+                          "hx-swap": "innerHTML", "hx-trigger": "change"})
+
+    info = Div(Div(H3("Ticket"), _sla(t), cls="card-header"),
+               Div(Span("Status", cls="k"), _select("status", db.TICKET_STATUSES, t["status"], tid, "status"),
+                   Span("Priority", cls="k"), _select("priority", db.PRIORITIES, t["priority"], tid, "priority"),
+                   Span("Type", cls="k"), _select("ticket_type", db.TICKET_TYPES, t["ticket_type"] or "Unspecified", tid, "ticket_type"),
+                   Span("Agent", cls="k"), agent_sel,
+                   Span("Customer", cls="k"), Span(t["customer"] or "—"),
+                   Span("Team", cls="k"), Span(t["team_name"] or "—"),
+                   Span("Opened", cls="k"), Span(_ago(t["created"])),
+                   Span("Resolve by", cls="k"), Span(_ago(t["resolution_by"])),
+                   cls="kv"), cls="card")
+    timeline = Ul(*[Li(Div(Strong(NotStr(a["action"])), " ", Span(a["actor"] or "", style="color:var(--text-mute);")),
+                       Div(_ago(a["created"]), cls="when")) for a in acts] or [Li("No activity.")], cls="timeline")
+
+    return Div(Div(Div(Div(H3("Conversation"), cls="card-header"), thread, reply, cls="card")),
+               Div(info, Div(Div(H3("Activity"), cls="card-header"), timeline, cls="card")),
+               cls="detail-grid")
+
+
 def ticket_detail(tid):
     t = db.ticket(tid)
     if not t:
         return _title("Ticket not found"), P("No such ticket.")
-    msgs = db.messages_for(tid)
-    acts = db.activity_for(tid)
-
-    thread = Div(*[Div(Div(f"{m['author']} · {_ago(m['created'])}", cls="who"),
-                       Div(NotStr(m["body"])), cls=f"bubble {m['sender']}") for m in msgs],
-                 cls="thread")
-
-    info = Div(Div(H3("Ticket"), cls="card-header"),
-               Div(Span("Status", cls="k"), _pill(t["status"]),
-                   Span("Priority", cls="k"), _pill(t["priority"]),
-                   Span("SLA", cls="k"), _sla(t),
-                   Span("Type", cls="k"), Span(t["ticket_type"] or "—"),
-                   Span("Customer", cls="k"), Span(t["customer"] or "—"),
-                   Span("Contact", cls="k"), Span(t["contact_name"] or t["raised_by"] or "—"),
-                   Span("Team", cls="k"), Span(t["team_name"] or "—"),
-                   Span("Agent", cls="k"), Span(t["agent_name"] or "Unassigned"),
-                   Span("Opened", cls="k"), Span(_ago(t["created"])),
-                   Span("Resp. by", cls="k"), Span(_ago(t["response_by"])),
-                   Span("Resolve by", cls="k"), Span(_ago(t["resolution_by"])),
-                   cls="kv"), cls="card")
-
-    timeline = Ul(*[Li(Div(Strong(a["action"]), " ", Span(a["actor"] or "", style="color:var(--text-mute);")),
-                       Div(_ago(a["created"]), cls="when")) for a in acts] or [Li("No activity.")], cls="timeline")
-
     return (_title(t["subject"], f"Ticket #{t['id']}", A("← All tickets", href="/tickets", cls="btn")),
-            Div(Div(Div(Div(H3("Conversation"), cls="card-header"), thread, cls="card")),
-                Div(info, Div(Div(H3("Activity"), cls="card-header"), timeline, cls="card")),
-                cls="detail-grid"))
+            Div(ticket_main(tid), id="ticket-main"))
 
 
 # ---------- agents ----------------------------------------------------------

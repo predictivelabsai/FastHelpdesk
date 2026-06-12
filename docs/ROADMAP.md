@@ -23,7 +23,7 @@ what's deferred.
 
 ## Near-term roadmap 🔜
 
-1. **Write operations** — currently read-only over synthetic data. Add HTMX
+1. ✅ **Write operations** (done) — HTMX
    reply box, internal-note composer, status/priority change, and **assign to
    agent** with optimistic SLA recompute.
 2. **Ticket templates & types** — `HD Ticket Template`/`…Field` (structured

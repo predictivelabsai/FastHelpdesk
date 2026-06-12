@@ -36,9 +36,10 @@ SLA_TARGETS = {
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -262,3 +263,56 @@ def messages_for(tid: int):
 
 def activity_for(tid: int):
     return rows("SELECT * FROM ticket_activity WHERE ticket_id=? ORDER BY created DESC", (tid,))
+
+
+def agents() -> list[dict]:
+    return rows("SELECT a.id, a.name, t.name team FROM agents a LEFT JOIN teams t ON t.id=a.team_id "
+                "WHERE a.is_active=1 ORDER BY a.name")
+
+
+# --- write operations (transactional) ---------------------------------------
+
+def _log(tid, action, actor="Agent"):
+    with cursor() as conn:
+        conn.execute("INSERT INTO ticket_activity(ticket_id,action,actor,created) VALUES(?,?,?,datetime('now'))",
+                     (tid, action, actor))
+
+
+def add_message(tid: int, sender: str, body: str, author: str = "Agent"):
+    """sender: 'agent' (reply) | 'note' (internal) | 'customer'."""
+    if not body.strip():
+        return
+    with cursor() as conn:
+        conn.execute("INSERT INTO ticket_messages(ticket_id,sender,author,body,created) "
+                     "VALUES(?,?,?,?,datetime('now'))", (tid, sender, author, body.strip()))
+        # an agent reply sets first_responded_on (if unset) and moves Open→Replied
+        if sender == "agent":
+            t = conn.execute("SELECT first_responded_on, status FROM tickets WHERE id=?", (tid,)).fetchone()
+            if t and not t[0]:
+                conn.execute("UPDATE tickets SET first_responded_on=datetime('now') WHERE id=?", (tid,))
+            if t and t[1] == "Open":
+                conn.execute("UPDATE tickets SET status='Replied' WHERE id=?", (tid,))
+    _log(tid, "Reply sent" if sender == "agent" else "Internal note added")
+
+
+def set_ticket_field(tid: int, field: str, value: str):
+    allowed = {"status": TICKET_STATUSES, "priority": PRIORITIES, "ticket_type": TICKET_TYPES}
+    if field not in allowed or value not in allowed[field]:
+        return False
+    closed = ", resolved_on=datetime('now')" if (field == "status" and value in CLOSED_STATUSES) else ""
+    with cursor() as conn:
+        conn.execute(f"UPDATE tickets SET {field}=?{closed} WHERE id=?", (value, tid))
+    _log(tid, f"{field.replace('_',' ').title()} changed to <strong>{value}</strong>")
+    return True
+
+
+def assign_agent(tid: int, agent_id):
+    with cursor() as conn:
+        if agent_id:
+            a = conn.execute("SELECT name FROM agents WHERE id=?", (agent_id,)).fetchone()
+            conn.execute("UPDATE tickets SET agent_id=? WHERE id=?", (agent_id, tid))
+            msg = f"Assigned to <strong>{a[0] if a else 'agent'}</strong>"
+        else:
+            conn.execute("UPDATE tickets SET agent_id=NULL WHERE id=?", (tid,))
+            msg = "Unassigned"
+    _log(tid, msg)

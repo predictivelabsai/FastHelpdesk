@@ -108,6 +108,31 @@ def get(session, tid: int):
     return _guard(session, "tickets", lambda: views.ticket_detail(tid))
 
 
+def _tfrag(session, tid):
+    if not _user(session):
+        return Response("Unauthorized", status_code=401)
+    return views.ticket_main(tid)
+
+
+@rt("/tickets/{tid}/message")
+def post(session, tid: int, body: str = "", sender: str = "agent"):
+    db.add_message(tid, "note" if sender == "note" else "agent", body)
+    return _tfrag(session, tid)
+
+
+@rt("/tickets/{tid}/field")
+def post(session, tid: int, field: str = "", status: str = "", priority: str = "", ticket_type: str = ""):
+    val = {"status": status, "priority": priority, "ticket_type": ticket_type}.get(field, "")
+    db.set_ticket_field(tid, field, val)
+    return _tfrag(session, tid)
+
+
+@rt("/tickets/{tid}/assign")
+def post(session, tid: int, agent_id: str = ""):
+    db.assign_agent(tid, int(agent_id) if agent_id else None)
+    return _tfrag(session, tid)
+
+
 @rt("/agents")
 def get(session):
     return _guard(session, "agents", views.agents_list)
