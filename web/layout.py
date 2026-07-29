@@ -138,7 +138,8 @@ NAV_ITEMS = [
                     ("escalations", "Escalation Rules", "⚡", "/escalations")]),
     ("KNOWLEDGE", [("kb", "Knowledge Base", "📚", "/kb"),
                    ("customers", "Customers", "🏢", "/customers")]),
-    ("HELP", [("guide", "User Guide", "📖", "/guide")]),
+    ("HELP", [("guide", "User Guide", "📖", "/guide"),
+              ("developers", "Developers", "⌘", "/developers")]),
 ]
 SAMPLE_QUESTIONS = [
     "Which tickets are breaching SLA?",
